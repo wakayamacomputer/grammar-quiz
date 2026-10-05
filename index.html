@@ -12,7 +12,7 @@
 html,body{margin:0;background:var(--bg);color:var(--fg);font-family:"Hiragino Sans","Yu Gothic",Meiryo,sans-serif;font-size:17px;line-height:1.6;
  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 #app{max-width:520px;margin:0 auto;padding:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 20px;margin-bottom:14px}
 h1{font-size:22px;margin:4px 0 12px}
 .note{background:var(--warn);border-radius:10px;padding:10px 12px;font-size:15px}
 label{display:block;font-weight:bold;margin:12px 0 4px}
@@ -24,9 +24,10 @@ select,input{width:100%;font-size:18px;padding:12px;border:1px solid var(--line)
 .bar{height:12px;background:var(--line);border-radius:6px;overflow:hidden;margin:8px 0 14px}
 .bar>div{height:100%;background:var(--pri);width:100%}
 .bar.low>div{background:var(--ng)}
-.sent{font-size:22px;line-height:2.1;margin:6px 0 16px}
+.sent{font-size:21px;line-height:2.6;margin:14px 0 24px;letter-spacing:.02em}
+.sent .blank{display:inline-block;min-width:2.6em;padding:1px 6px;margin:0 2px;border-bottom:3px solid var(--pri);color:var(--pri);font-weight:bold;text-align:center}
 .qtype{font-size:15px;color:var(--sub)}
-.opt{font-size:20px;padding:16px}
+.opt{font-size:20px;padding:16px;margin-top:12px;line-height:1.5}
 table{width:100%;border-collapse:collapse;font-size:16px}
 td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
 .mk{font-weight:bold;font-size:20px;width:2.2em}
@@ -130,6 +131,8 @@ var byId = {}; QS.forEach(function (q) { byId[q.id] = q; });
 function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// 文中の空欄（（　）（　　）など、全角丸かっこ＋全角スペース）を、下線つきの目立つ枠で強調する
+function fmtSent(s) { return esc(s).replace(/（[\s　]*）/g, '<span class="blank">（　）</span>').replace(/\n/g, '<br>'); }
 function shuffle(a, rnd) {
   a = a.slice();
   for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; }
@@ -188,7 +191,7 @@ function showQ() {
   $app.innerHTML = '<div class="card"><div class="top"><span>第 ' + (S.i + 1) + ' 問 / ' + S.plan.length + '</span><span id="sec"></span></div>' +
     '<div class="bar" id="bar"><div id="fill"></div></div>' +
     '<div class="qtype">（　）に入る<b>ことば</b>をえらんでください</div>' +
-    '<div class="sent">' + esc(q.sentence) + '</div>' +
+    '<div class="sent">' + fmtSent(q.sentence) + '</div>' +
     shown.map(function (t, i) { return '<button class="btn opt" data-i="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
   Array.prototype.forEach.call($app.querySelectorAll('.opt'), function (b) {
     b.onclick = function () { answer(+b.getAttribute('data-i')); };
