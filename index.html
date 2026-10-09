@@ -24,10 +24,17 @@ select,input{width:100%;font-size:18px;padding:12px;border:1px solid var(--line)
 .bar{height:12px;background:var(--line);border-radius:6px;overflow:hidden;margin:8px 0 14px}
 .bar>div{height:100%;background:var(--pri);width:100%}
 .bar.low>div{background:var(--ng)}
-.sent{font-size:21px;line-height:2.6;margin:14px 0 24px;letter-spacing:.02em}
+.sent{font-size:21px;line-height:2.6;margin:14px 0 18px;letter-spacing:.02em}
 .sent .blank{display:inline-block;min-width:2.6em;padding:1px 6px;margin:0 2px;border-bottom:3px solid var(--pri);color:var(--pri);font-weight:bold;text-align:center}
 .qtype{font-size:15px;color:var(--sub)}
 .opt{font-size:20px;padding:16px;margin-top:12px;line-height:1.5}
+.opt.sel{border-color:var(--pri);background:var(--pri);color:#fff;font-weight:bold}
+.timerbar{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}
+.timerbar-in{max-width:520px;margin:0 auto;padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
+.timerbar .big{font-size:24px;font-weight:bold}
+.timerbar.low .big{color:var(--ng)}
+.qspacer{height:58px}
+.qnum{font-size:14px;color:var(--sub);font-weight:bold}
 table{width:100%;border-collapse:collapse;font-size:16px}
 td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
 .mk{font-weight:bold;font-size:20px;width:2.2em}
@@ -98,6 +105,9 @@ var CHKMULT = 7734;
 'use strict';
 var $app = document.getElementById('app');
 var params = new URLSearchParams(location.search);
+// ?grade=1 または ?grade=2 がURLに付いていたら、その学年のクラスしか選べないようにする
+// （学年ごとに別のQRコード・リンクにして、学年を間違えて選んでしまう事故を防ぐため。2026-10-09）
+var GRADE = params.get('grade');
 // 今週のテストを自動で選ぶ: ①?t=テストID があればそれ ②今日の日付が from〜until に入るテスト
 // ③期間が始まっているもののうち一番新しいテスト ④どれもまだ始まっていなければ、まだ小テストはありません
 function pickTest() {
@@ -117,7 +127,7 @@ if (!test) {
   throw new Error('no test yet');
 }
 var KEY = 'gq1:' + test.id;
-var S = null, QS = null, timer = null, away = false, locked = false;
+var S = null, QS = null, timer = null, away = false;
 
 // ---- 問題データの復号（簡易難読化） ----
 function loadQuestions() {
@@ -154,10 +164,13 @@ function opts(q) { return [q.answer].concat(q.w); }
 
 // ---- 画面 ----
 function startScreen() {
-  var cls = CFG.classes.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
-  $app.innerHTML = '<div class="card"><h1>' + esc(test.title) + '</h1>' +
-    '<div class="note">・全部で <b>' + test.total + '問</b>。1問ごとに制限時間があります。<br>' +
-    '・前の問題にはもどれません。<br>・教科書やスマホの他のアプリは見ません。<b>' + (test.onLeave === 'end' ? '画面をはなれると、その時点でテストが おわります。' : '画面をはなれると記録されます。') + '</b><br>' +
+  var classList = GRADE ? CFG.classes.filter(function (c) { return c[0] === GRADE; }) : CFG.classes;
+  var cls = classList.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
+  var gradeLabel = GRADE ? '<div class="note" style="margin-bottom:10px"><b>' + esc(GRADE) + '年生用</b>のリンクです。' + esc(GRADE) + '年生のクラスだけ選べます。</div>' : '';
+  $app.innerHTML = '<div class="card"><h1>' + esc(test.title) + '</h1>' + gradeLabel +
+    '<div class="note">・全部で <b>' + test.total + '問</b>。上に<b>のこり時間</b>が出ます。<br>' +
+    '・問題は全部ならんでいます。好きな順番で答えて、さいごに「おわる」ボタンを おしてください。時間になったら自動的に おわります。<br>' +
+    '・教科書やスマホの他のアプリは見ません。<b>' + (test.onLeave === 'end' ? '画面をはなれると、その時点でテストが おわります。' : '画面をはなれると記録されます。') + '</b><br>' +
     '・テストは<b>1回だけ</b>です。</div>' +
     '<label>クラス</label><select id="cls"><option value="">えらんでください</option>' + cls + '</select>' +
     '<label>学籍番号の下4桁（すうじ）</label><input id="sid" inputmode="numeric" maxlength="4" placeholder="例：1234" autocomplete="off">' +
@@ -173,47 +186,54 @@ function startScreen() {
       '<button class="btn pri" id="yes">はい、テストをはじめる</button><button class="btn" id="no">もどる</button></div>';
     document.getElementById('no').onclick = startScreen;
     document.getElementById('yes').onclick = function () {
-      S = { cls: c, sid: s, plan: makePlan(c, s), i: 0, res: [], leaves: 0, lv: 0, t0: Date.now(), qs: 0, done: false };
+      S = { cls: c, sid: s, plan: makePlan(c, s), ans: [], leaves: 0, t0: Date.now(), done: false };
       if (!S.plan.length) { S = null; startScreen(); return; }
-      save(); showQ();
+      save(); quizScreen();
     };
   };
   function err(m) { document.getElementById('err').textContent = m; }
 }
 
+// 全体の制限時間（秒）＝ 1問あたりの目安時間 × 問題数。上の「のこり時間」バーはこれで動く。
+var TOTAL_TIME = test.timeLimit * test.total;
 var graceUntil = 0;
-function showQ() {
-  clearInterval(timer); locked = false; graceUntil = Date.now() + 1500;
-  if (S.i >= S.plan.length) return finish();
-  var p = S.plan[S.i], q = byId[p.id], lim = test.timeLimit;
-  if (!S.qs) { S.qs = Date.now(); S.lv = 0; save(); }
-  var o = opts(q), shown = p.o.map(function (k) { return o[k]; });
-  $app.innerHTML = '<div class="card"><div class="top"><span>第 ' + (S.i + 1) + ' 問 / ' + S.plan.length + '</span><span id="sec"></span></div>' +
-    '<div class="bar" id="bar"><div id="fill"></div></div>' +
-    '<div class="qtype">（　）に入る<b>ことば</b>をえらんでください</div>' +
-    '<div class="sent">' + fmtSent(q.sentence) + '</div>' +
-    shown.map(function (t, i) { return '<button class="btn opt" data-i="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
+// ---- 問題を全部ならべて表示し、さいごに「おわる」ボタンでまとめて送信する（Formsのクイズに近い形式） ----
+function quizScreen() {
+  clearInterval(timer); graceUntil = Date.now() + 1500;
+  var blocks = S.plan.map(function (p, i) {
+    var q = byId[p.id], o = opts(q), shown = p.o.map(function (k) { return o[k]; });
+    var opts_html = shown.map(function (t, j) {
+      var sel = S.ans[i] === j ? ' sel' : '';
+      return '<button class="btn opt' + sel + '" data-qi="' + i + '" data-ci="' + j + '">' + esc(t) + '</button>';
+    }).join('');
+    return '<div class="card"><div class="qnum">第 ' + (i + 1) + ' 問 / ' + S.plan.length + '</div>' +
+      '<div class="qtype">（　）に入る<b>ことば</b>をえらんでください</div>' +
+      '<div class="sent">' + fmtSent(q.sentence) + '</div>' + opts_html + '</div>';
+  }).join('');
+  $app.innerHTML =
+    '<div class="timerbar" id="timerbar"><div class="timerbar-in"><span>のこり時間</span><span class="big" id="sec"></span></div></div>' +
+    '<div class="qspacer"></div>' + blocks +
+    '<div class="card"><button class="btn pri" id="finishBtn">おわる（けっかを見る）</button>' +
+    '<p class="small" style="text-align:center;margin-top:8px">全部答えたら おしてください。時間になったら自動的に おわります。</p></div>';
   Array.prototype.forEach.call($app.querySelectorAll('.opt'), function (b) {
-    b.onclick = function () { answer(+b.getAttribute('data-i')); };
+    b.onclick = function () { select(+b.getAttribute('data-qi'), +b.getAttribute('data-ci'), b); };
   });
+  document.getElementById('finishBtn').onclick = function () { finishQuiz(false); };
   function tick() {
-    var left = lim - (Date.now() - S.qs) / 1000;
-    if (left <= 0) { answer(-1); return; }
-    document.getElementById('sec').textContent = '残り ' + Math.ceil(left) + ' 秒';
-    document.getElementById('fill').style.width = (left / lim * 100) + '%';
-    document.getElementById('bar').className = 'bar' + (left <= 5 ? ' low' : '');
+    var left = TOTAL_TIME - (Date.now() - S.t0) / 1000;
+    if (left <= 0) { finishQuiz(true); return; }
+    var leftInt = Math.ceil(left), m = Math.floor(leftInt / 60), sec = leftInt % 60;
+    document.getElementById('sec').textContent = m + '分' + ('0' + sec).slice(-2) + '秒';
+    document.getElementById('timerbar').className = 'timerbar' + (left <= 30 ? ' low' : '');
   }
-  tick(); timer = setInterval(tick, 100);
+  tick(); timer = setInterval(tick, 250);
 }
 
-function answer(ch) {
-  if (locked) return; locked = true; clearInterval(timer);
-  var p = S.plan[S.i], q = byId[p.id];
-  var ok = ch >= 0 && p.o[ch] === 0;
-  if (ok && test.onLeave === 'wrong' && S.lv) ok = false;
-  S.res.push({ ch: ch, ok: ok ? 1 : 0, lv: S.lv, t: Math.round((Date.now() - S.qs) / 100) / 10 });
-  S.i++; S.qs = 0; S.lv = 0; save();
-  setTimeout(showQ, 150);
+function select(qi, ci, btn) {
+  if (S.done) return;
+  S.ans[qi] = ci; save();
+  Array.prototype.forEach.call(btn.parentNode.querySelectorAll('.opt'), function (b) { b.classList.remove('sel'); });
+  btn.classList.add('sel');
 }
 
 function passed(score, n) { return score * 100 / n >= (test.passRate || 80); }
@@ -222,29 +242,40 @@ function formsUrlFor(cls) {
   var g = (cls || '')[0];
   return (CFG.formsUrlByGrade && CFG.formsUrlByGrade[g]) || '';
 }
+// 「おわる」ボタン・時間切れ・画面はなれ(onLeave:'end')のどれでも、ここで1回だけ採点・結果コード作成を行う
+function finishQuiz(timeUp) {
+  if (S.done) return;
+  clearInterval(timer);
+  S.res = S.plan.map(function (p, i) {
+    var ch = (typeof S.ans[i] === 'number') ? S.ans[i] : -1;
+    var ok = ch >= 0 && p.o[ch] === 0;
+    return { ch: ch, ok: ok ? 1 : 0 };
+  });
+  S.timeUp = !!timeUp;
+  S.done = true;
+  var score = S.res.reduce(function (a, r) { return a + r.ok; }, 0);
+  S.code = makeCode({
+    t: test.id, c: S.cls, s: S.sid, sc: score, n: S.plan.length, pf: passed(score, S.plan.length) ? 1 : 0,
+    a: S.res.map(function (r) { return r.ok; }).join(''),
+    ch: S.res.map(function (r) { return r.ch < 0 ? 'x' : r.ch; }).join(''),
+    lv: S.leaves, lq: S.plan.map(function () { return '0'; }).join(''),
+    d: Math.round((Date.now() - S.t0) / 1000), q: S.plan.map(function (p) { return p.id; }).join(',')
+  });
+  save();
+  finish();
+}
+
 function finish() {
-  if (!S.done) {
-    S.done = true;
-    var score = S.res.reduce(function (a, r) { return a + r.ok; }, 0);
-    S.code = makeCode({
-      t: test.id, c: S.cls, s: S.sid, sc: score, n: S.plan.length, pf: passed(score, S.plan.length) ? 1 : 0,
-      a: S.res.map(function (r) { return r.ok; }).join(''),
-      ch: S.res.map(function (r) { return r.ch < 0 ? 'x' : r.ch; }).join(''),
-      lv: S.leaves, lq: S.res.map(function (r) { return r.lv ? 1 : 0; }).join(''),
-      d: Math.round((Date.now() - S.t0) / 1000), q: S.plan.map(function (p) { return p.id; }).join(',')
-    });
-    save();
-  }
   var score = S.res.reduce(function (a, r) { return a + r.ok; }, 0);
   var rows = S.res.map(function (r, i) {
     var q = byId[S.plan[i].id];
     return '<tr><td>' + (i + 1) + '</td><td class="mk ' + (r.ok ? 'o' : 'x') + '">' + (r.ok ? '○' : '×') + '</td><td>' +
-      esc(q.answer) + (r.ch === -1 ? ' <span class="small">（時間切れ）</span>' : '') +
-      (r.ch === -2 ? ' <span class="small">（テスト終了のため）</span>' : '') +
-      (r.lv ? ' <span class="small">（画面をはなれた）</span>' : '') + '</td></tr>';
+      esc(q.answer) + (r.ch === -1 ? ' <span class="small">（未回答）</span>' : '') + '</td></tr>';
   }).join('');
   $app.innerHTML = '<div class="card"><h1>テストおわり</h1>' +
-    (S.ended ? '<div class="note" style="margin-bottom:10px"><b>画面をはなれたので、テストが おわりました。</b> のこりの もんだいは ×です。</div>' : '') + '<div class="score">' + Math.round(score * 100 / S.plan.length) + ' 点</div>' +
+    (S.ended ? '<div class="note" style="margin-bottom:10px"><b>画面をはなれたので、テストが おわりました。</b> 答えていなかった もんだいは ×です。</div>' : '') +
+    (S.timeUp ? '<div class="note" style="margin-bottom:10px"><b>時間になったので、テストが おわりました。</b> 答えていなかった もんだいは ×です。</div>' : '') +
+    '<div class="score">' + Math.round(score * 100 / S.plan.length) + ' 点</div>' +
     '<div style="text-align:center;font-size:15px;color:var(--sub)">（' + score + ' / ' + S.plan.length + ' 問せいかい）</div>' +
     (passed(score, S.plan.length)
       ? '<div class="note" style="margin:10px 0;text-align:center;font-size:20px;border:2px solid var(--ok)"><b style="color:var(--ok)">○ 合格</b></div>'
@@ -252,10 +283,10 @@ function finish() {
     '<p class="small" style="text-align:center">クラス ' + esc(S.cls) + ' ／ 下4桁 ' + esc(S.sid) + ' ／ 画面をはなれた回数：' + S.leaves + ' 回</p>' +
     '<table><tr><th>No.</th><th></th><th>正しい答え</th></tr>' + rows + '</table></div>' +
     (formsUrlFor(S.cls)
-      ? '<div class="card"><h1>けっかを出す</h1><div class="note">下のボタンを おして、<b>Formsで「送信」</b>を おしてください。<br>入力は いりません。</div>' +
-        '<button class="btn pri" id="send">① けっかを出す（Forms）</button>' +
-        '<details style="margin-top:14px"><summary class="small">ボタンが ひらかないとき</summary>' +
-        '<p class="small">下のコードをコピーして、先生に 見せてください。</p></details>' +
+      ? '<div class="card"><h1>けっかを出す</h1><div class="note">① 下のボタンをおすと、<b>べつの画面（タブ）</b>がひらきます。<br>② そこで、かならず<b>Formsの「送信」ボタン</b>をおしてください。<br>③ 送信できたら、もとの画面（この画面）にもどって、とじてOKです。<br><b>「送信」を おし忘れると、記録が のこりません。</b></div>' +
+        '<button class="btn pri" id="send">けっかの画面をひらく</button>' +
+        '<div id="sendAgain" style="display:none;margin-top:10px" class="note"><b>まだ「送信」を おしていませんか？</b><br>もう一度ひらいて、Formsの「送信」ボタンを おしてください。</div>' +
+        '<p class="small" style="margin-top:14px">うまく送信できなかったときのために、下のコードもコピーして先生に見せてください。</p>' +
         '<textarea id="code" readonly>' + esc(S.code) + '</textarea>' +
         '<button class="btn" id="cp">コードをコピーする</button><div id="cpm" class="small"></div></div>'
       : '<div class="card"><h1>結果コード</h1><div class="note">下のコードを<b>ぜんぶコピー</b>して、先生に出してください。</div>' +
@@ -268,7 +299,6 @@ function finish() {
       test: (test.no || test.title), class: S.cls, id: S.sid, score: scorePct, total: S.plan.length, result: passed(score, S.plan.length) ? '合格' : '不合格',
       answers: S.res.map(function (r) { return r.ok ? '○' : '×'; }).join(''),
       leaves: S.leaves,
-      leaveQs: S.res.map(function (r, i) { return r.lv ? i + 1 : ''; }).filter(String).join(' '),
       time: Math.round((Date.now() - S.t0) / 1000), code: S.code,
       chk: (scorePct * CHKMULT) % 97   // Excelの数式で得点と照合できる検査値（=IF(MOD([@得点]*掛け算,97)=[@検査値],...)）
     };
@@ -282,7 +312,11 @@ function finish() {
       var v = encodeURIComponent(String(vals[k]));
       u = u.split('{' + k + '}').join(v).split('%7B' + k + '%7D').join(v).split('%7b' + k + '%7d').join(v);
     });
-    location.href = u;
+    // 別タブで開く（location.hrefで移動すると、万が一「送信」を押し忘れたときに
+    // この結果コード画面ごと失われてしまうため、この画面は残したまま別タブでFormsを開く）
+    window.open(u, '_blank');
+    sendBtn.textContent = 'もう一度ひらく';
+    document.getElementById('sendAgain').style.display = 'block';
   };
   document.getElementById('cp').onclick = function () {
     var t = document.getElementById('code'); t.select(); t.setSelectionRange(0, 99999);
@@ -298,16 +332,14 @@ function leave(hard) {
   if (!S || S.done) return;
   if (!hard && Date.now() < graceUntil) return; // 画面の切り替わり直後のフォーカス移動は無視
   if (hard && test.onLeave === 'end') pendingEnd = true; // 戻ってきたときに終了（再読み込みでは終了しない）
-  if (!away) { away = true; S.leaves++; S.lv = 1; save(); }
+  if (!away) { away = true; S.leaves++; save(); }
 }
 var pendingEnd = false;
 function back() { away = false; if (pendingEnd && S && !S.done) { pendingEnd = false; forceEnd(); } }
-// 「end」設定: 別のアプリに切り替えたら、その時点でテストを終了し、残りは不正解にする
+// 「end」設定: 別のアプリに切り替えたら、その時点でテストを終了し、答えていない問題は不正解にする
 function forceEnd() {
-  clearInterval(timer);
-  if (S.res.length < S.plan.length) S.res.push({ ch: -3, ok: 0, lv: 1, t: 0 });   // 離脱した問題
-  while (S.res.length < S.plan.length) S.res.push({ ch: -2, ok: 0, lv: 0, t: 0 }); // 残り（出題されず）
-  S.i = S.plan.length; S.ended = 1; S.qs = 0; save(); finish();
+  S.ended = 1;
+  finishQuiz(false);
 }
 document.addEventListener('visibilitychange', function () { document.hidden ? leave(true) : back(); });
 window.addEventListener('blur', function () { leave(false); }); // フォーカスが外れただけ（通知など）は記録のみ
@@ -336,7 +368,7 @@ if (params.get('reset') && params.get('reset') === cyrb53(SALT + 'reset').toStri
 }
 S = load();
 if (S && S.done) finish();
-else if (S && S.plan) { S.leaves++; S.lv = 1; save(); showQ(); } // 再読み込みも「離脱」として記録
+else if (S && S.plan) { S.leaves++; save(); quizScreen(); } // 再読み込みも「離脱」として記録
 else { S = null; startScreen(); }
 })();
 </script>
