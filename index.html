@@ -335,7 +335,16 @@ function leave(hard) {
   if (!away) { away = true; S.leaves++; save(); }
 }
 var pendingEnd = false;
-function back() { away = false; if (pendingEnd && S && !S.done) { pendingEnd = false; forceEnd(); } }
+function back() {
+  away = false;
+  if (pendingEnd && S && !S.done) {
+    pendingEnd = false;
+    // 戻ってきた瞬間に、なぜテストが終わるのかをポップアップではっきり伝える
+    // （結果画面の小さい注意書きだけだと見落とされ、「なぜ不合格か分からない」という声があったため）
+    alert('画面をはなれました。\nこのテストはこれで終わります。答えていない問題は「×」になります。');
+    forceEnd();
+  }
+}
 // 「end」設定: 別のアプリに切り替えたら、その時点でテストを終了し、答えていない問題は不正解にする
 function forceEnd() {
   S.ended = 1;
