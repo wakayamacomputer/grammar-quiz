@@ -86,10 +86,10 @@ document.getElementById('go').onclick = function () {
   });
   rows.forEach(function (r) { r.push(seen[r[10]] > 1 ? '重複' : ''); r.splice(10, 1); });
   var dup = Object.keys(seen).filter(function (k) { return seen[k] > 1; });
-  if (dup.length) msg.push('同じクラス・Teams IDの重複があります: ' + dup.map(function (k) { return k.replace(/\|/g, ' / '); }).join(', '));
+  if (dup.length) msg.push('同じクラス・学籍番号の重複があります: ' + dup.map(function (k) { return k.replace(/\|/g, ' / '); }).join(', '));
   if (rows.some(function (r) { return r[9] === 'NG'; })) msg.push('チェック値がNGの行があります（コードが書き換えられた可能性）。');
   document.getElementById('msg').innerHTML = msg.map(function (m) { return '<div class="warn">' + m.replace(/</g, '&lt;') + '</div>'; }).join('');
-  var head = ['テストID', 'クラス', 'Teams ID', '得点', '合否', '各問の正誤', '離脱回数', '離脱した問題', '所要時間(秒)', 'チェック', '重複'];
+  var head = ['テストID', 'クラス', '学籍番号', '得点', '合否', '各問の正誤', '離脱回数', '離脱した問題', '所要時間(秒)', 'チェック', '重複'];
   var h = '<tr>' + head.map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr>';
   rows.forEach(function (r) { h += '<tr>' + r.map(function (x, i) { return '<td' + ((i === 9 && x === 'NG') || (i === 10 && x) ? ' class="ng"' : '') + '>' + String(x).replace(/</g, '&lt;') + '</td>'; }).join('') + '</tr>'; });
   document.getElementById('tb').innerHTML = h;
